@@ -5,7 +5,7 @@
 # be set by modifying the "mode" variable below.
 #
 #	"hourly" will just extract all profiles within the OMI overpass times 
-# of the continental US, with the intention that the user will select the 
+# of the continental US/CN, with the intention that the user will select the 
 # appropriate profile later. 
 #	"daily" will average those profiles for each day based on the 
 # longitude and UTC time - profiles will be given more weight the closer 
@@ -13,6 +13,8 @@
 # have a weight of 0.  
 #	"monthly" will average with weights as in "daily" but over a month
 # rather than a single day.
+#
+# "d02"(d03) will eclect wrfout_d02*(wrfout_d03*)
 #
 # This script does not directly perform any of those calculations, instead
 # it collects the names of the WRF output files that belong
@@ -22,11 +24,13 @@
 # read_wrf_output.sh in parallel.
 
 # Josh Laughner <joshlaugh5@gmail.com> 2 Jul 2015
+# modified Xin Zhang <xinzhang1215@gmail.com> May 2018
 
 # Parse command arguments looking for two things: the averaging mode and which set of 
 # output quantities to copy/calculate. Credit to 
 # http://stackoverflow.com/questions/192249/how-do-i-parse-command-line-arguments-in-bash
 # for the code outline.
+
 while [[ $# > 0 ]]
 do
 keyin="$1"
@@ -41,6 +45,13 @@ key=$(echo $keyin | awk '{print tolower($0)}')
         varsout=$key
         shift
         ;;
+        'd01'|'d02'|'d03')
+        domain=$key
+        shift
+        ;;
+        'keep'|'del')
+        choice=$key
+        ;;
         *) # catch unrecognized arguments
         echo "The argument \"$key\" is not recognized"
         exit 1
@@ -49,7 +60,7 @@ key=$(echo $keyin | awk '{print tolower($0)}')
 done
 
 # Set the defaults - averaging mode will default to "hourly"
-# and the outputs to "behr"
+# the outputs to "behr" and domain to "d01"
 if [[ $mode == '' ]]
 then
     mode='hourly'
@@ -60,23 +71,25 @@ then
     varsout='behr'
  fi
 
+if [[ $domain == '' ]]
+then
+    domain='d01'
+fi
+
+if [[ $choice == '' ]]
+then
+    choice='keep'
+fi
+
 # export the mode so that the child scripts can access it
 export WRFPROCMODE=$mode
 
-# Where the actual scripts are kept.
-scriptdir='/Users/Josh/Documents/MATLAB/BEHR/WRF_Utils/'
-export JLL_WRFSCRIPT_DIR=$scriptdir
+# Where the actual scripts (read_wrf_output.sh) are kept.
+scriptdir='/nuist/u/home/yinyan/xin/work/BEHR/WRF-nco-tools/'
+export WRFSCRIPT_DIR=$scriptdir
 
-# nprocs should match the number of cpus in the node (32 for brewer)
-nprocs=20
-# nthreads should divide nprocs evenly. Small is good.
-nthreads=4
-
-# Initialization
-nthreadsM1=`expr $nthreads - 1`     # just nthreads minus 1
-procskip=`expr $nprocs / $nthreads` # number of processors to skip
-jj=0                                # parallel thread counter
-
+# Where new wrfout* files are saved
+savedir='/nuist/u/home/yinyan/xin/work/BEHR/data/wrf_profiles/history/'
 
 # Check the mode selection
 
@@ -88,14 +101,22 @@ else
     echo "mode set to $mode"
 fi
 
+# Check the domain selection
+if [ "$(echo wrfout_$domain*)" == "wrfout_$domain*" ]; then
+    echo "wrfout_$domain* not found"
+else
+    :
+fi
+
 # Find all unique dates - we'll need this to iterate over each day
 # If we're doing monthly averages, then we just need to get the year and month
+
 dates=''
 olddate=''
-for file in ./wrfout*
+for file in ./wrfout_$domain*
 do
     # Handle wrfout and wrfout_subset files
-    dtmp=$(awk -v a="$file" -v b="d01" 'BEGIN{print index(a,b)}')
+    dtmp=$(awk -v a="$file" -v b="$domain" 'BEGIN{print index(a,b)}')
     dstart=$((dtmp+3))
     if [[ $mode == 'monthly' ]]
     then
@@ -118,22 +139,26 @@ do
     echo "Files on $day"
     echo ""
     # WRF file names include output time in UTC. We'll look for the output
-    # in the range of UTC times when OMI will be passing over North America
+    # in the range of UTC times when OMI will be passing over domain
     # for this day
+    # North America: {18,19,20,21,22}
+    # Southeast China: {06,07}
     # If there are no files for this day or month, then it will try to iterate
     # over the wildcard patterns themselves. Since those contain *, we
     # can avoid doing anything in that case by requiring that the file
     # name does not include a *
-    filepattern=$(echo wrfout*_d01_${day}-??_{18,19,20,21,22}*)
+    filepattern=$(echo wrfout*_"$domain"_${day}_{06,07}*)
     if [[ $filepattern != *'*'* ]]
     then
-        echo "    $filepattern"
+        echo -e "Elect these wrfout*\n$filepattern"
         echo "$filepattern" > read_wrf.conf
         # Choose which command to execute based on the command arguments
         if [[ $varsout == 'behr' ]]
         then
             echo "Calling read_wrf_output"
             $scriptdir/read_wrf_output.sh read_wrf.conf
+            mv *.tmpnc $savedir
+            for file in $savedir*.tmpnc; do mv "$file" "${file%%.tmpnc}"; done
         elif [[ $varsout == 'emis' ]]
         then
             $scriptdir/read_wrf_emis.sh read_wrf.conf
@@ -146,5 +171,3 @@ do
         fi
     fi
 done
-
-rm *.tmpnc *.tmp
