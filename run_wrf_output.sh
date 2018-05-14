@@ -49,8 +49,13 @@ key=$(echo $keyin | awk '{print tolower($0)}')
         domain=$key
         shift
         ;;
+        'lnox'|'nolnox')
+        kind=$key
+        shift
+        ;;
         'keep'|'del')
         choice=$key
+        shift
         ;;
         *) # catch unrecognized arguments
         echo "The argument \"$key\" is not recognized"
@@ -64,6 +69,14 @@ done
 if [[ $mode == '' ]]
 then
     mode='hourly'
+fi
+
+if [[ $kind == '' ]] || [[ $kind != 'lnox' && $kind != 'nolnox' ]]
+then
+    echo "Please input WRFKIND: lnox or nolnox"
+    exit 0
+else
+    echo "kind set to $kind"
 fi
 
 if [[ $varsout == '' ]]
@@ -81,8 +94,10 @@ then
     choice='keep'
 fi
 
-# export the mode so that the child scripts can access it
+# export the mode and the kind of wrfout*
+# so that the child scripts can access it
 export WRFPROCMODE=$mode
+export WRFKIND=$kind
 
 # Where the actual scripts (read_wrf_output.sh) are kept.
 scriptdir='/nuist/u/home/yinyan/xin/work/BEHR/WRF-nco-tools/'
@@ -103,16 +118,14 @@ fi
 
 # Check the domain selection
 if [ "$(echo wrfout_$domain*)" == "wrfout_$domain*" ]; then
-    echo "wrfout_$domain* not found"
-else
-    :
+    echo "wrfout_$domain* not found. Please input correct domain like d02"
 fi
 
 # Find all unique dates - we'll need this to iterate over each day
 # If we're doing monthly averages, then we just need to get the year and month
-
 dates=''
 olddate=''
+
 for file in ./wrfout_$domain*
 do
     # Handle wrfout and wrfout_subset files
@@ -150,15 +163,26 @@ do
     filepattern=$(echo wrfout*_"$domain"_${day}_{06,07}*)
     if [[ $filepattern != *'*'* ]]
     then
-        echo -e "Elect these wrfout*\n$filepattern"
+        echo -e "Select these wrfout* files:\n $filepattern"
         echo "$filepattern" > read_wrf.conf
         # Choose which command to execute based on the command arguments
         if [[ $varsout == 'behr' ]]
         then
             echo "Calling read_wrf_output"
             $scriptdir/read_wrf_output.sh read_wrf.conf
+
+            if [[ $kind == "lnox" ]]
+            then
+                savedir=${savedir}"lnox/"
+            else
+                savedir=${savedir}"nolnox/"
+            fi
+            mkdir -p $savedir
+
+            echo "Save to $savedir"
             mv *.tmpnc $savedir
             for file in $savedir*.tmpnc; do mv "$file" "${file%%.tmpnc}"; done
+
         elif [[ $varsout == 'emis' ]]
         then
             $scriptdir/read_wrf_emis.sh read_wrf.conf
@@ -171,3 +195,9 @@ do
         fi
     fi
 done
+
+# Whether delete original wrfout* files
+if [[ $choice == "del" ]]; then
+    echo "        Remove all wrfout* files in current directory"
+    rm wrfout_*
+fi

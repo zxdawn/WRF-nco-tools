@@ -7,8 +7,9 @@
 # Josh Laughner <joshlaugh5@gmail.com> 1 Jul 2015
 # modified Xin Zhang <xinzhang1215@gmail.com> May 2018
 
-# Retrieve the operational mode from the environmental variable
+# Retrieve the operational mode and kind from the environmental variable
 mode=$WRFPROCMODE
+kind=$WRFKIND
 
 # Where the various NCO scripts are located
 scriptdir=$WRFSCRIPT_DIR
@@ -36,10 +37,23 @@ do
     # We just need to extract necessary variables directly.
     echo "        Copying variables..."
     BEHR_variables="Times,XLAT,XLONG,XLONG_U,XLAT_U,XLONG_V,XLAT_V,U,V,COSALPHA,SINALPHA,P,PB,PHB,PH,no2,no,"
-    my_variables="T,HGT,QVAPOR,QICE,QCLOUD,QGRAUP,QSNOW,QRAIN"
-    variables=$BEHR_variables$my_variables
-    ncks -A -v $variables $file $file.tmpnc
+    my_variables="T,HGT,^Q.?"
+
+    if [[ $kind == "lnox" ]]
+    then
+        variables=$BEHR_variables$my_variables
+        echo "Copy $kind kind"
+        echo "        Copy variables: $variables"
+        ncks -A -O -h -v $variables $file $file.tmpnc
+        ncrename -h -v no2,no2_lnox -v no,no_lnox $file.tmpnc
+    else
+        variables="no2,no"
+        echo "Copy $kind kind"
+        echo "        Copy variables: $variables"
+        ncks -A -O -h -v $variables $file $file.tmpnc
+        ncrename -h -v no2,no2_nolnox -v no,no_nolnox $file.tmpnc
+    fi
     
     echo "        Copying attributes..."
-    ncks -A -x $file $file.tmpnc
+    ncks -A -h -x $file $file.tmpnc
 done
