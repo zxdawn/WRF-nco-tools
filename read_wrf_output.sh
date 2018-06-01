@@ -46,6 +46,7 @@ do
         echo "        Copy variables: $variables"
         ncks -A -O -h -v $variables $file $file.tmpnc
         ncrename -h -v no2,no2_lnox -v no,no_lnox $file.tmpnc
+        ncks -A -h -v no2 $file $file.tmpnc
     else
         variables="no2,no"
         echo "Copy $kind kind"
