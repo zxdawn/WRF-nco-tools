@@ -15,8 +15,9 @@ echo -e "Append these files:\n$files"
 for file in $files
 do
     ncks -A -h $nolnox_dir$file $lnox_dir$file
-    ncap2 -v -h -O -s 'lno2=no2_lnox-no2_nolnox;lno=no_lnox-no_nolnox' $lnox_dir$file $lnox_dir$file.tmpnc
+    ncap2 -v -h -O -s 'lno2=no2_lnox-no2_nolnox;lno=no_lnox-no_nolnox;lnox=no2_lnox-no2_nolnox+no_lnox-no_nolnox' $lnox_dir$file $lnox_dir$file.tmpnc
     ncks -A -h $lnox_dir$file.tmpnc $lnox_dir$file
+    ncatted -O -h -a description,lnox,o,c,'LNOx mixing ratio' $lnox_dir$file
     ncatted -O -h -a description,lno2,o,c,'LNO2 mixing ratio' $lnox_dir$file
     ncatted -O -h -a description,lno,o,c,'LNO mixing ratio' $lnox_dir$file
 done
