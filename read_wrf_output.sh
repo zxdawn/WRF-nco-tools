@@ -57,4 +57,7 @@ do
     
     echo "        Copying attributes..."
     ncks -A -h -x $file $file.tmpnc
+    
+    echo "        Calculating CLDFRA..."
+    python ${scriptdir}CLDFRA.py $file.tmpnc
 done
