@@ -43,21 +43,26 @@ do
     then
         variables=$BEHR_variables$my_variables
         echo "Copy $kind kind"
+        
         echo "        Copy variables: $variables"
         ncks -A -h -v $variables $file $file.tmpnc
         ncrename -h -v no2,no2_lnox -v no,no_lnox $file.tmpnc
         ncks -A -h -v no2 $file $file.tmpnc
+        
+        echo "        Copying attributes..."
+        ncks -A -h -x $file $file.tmpnc
+        
+        echo "        Calculating CLDFRA..."
+        python ${scriptdir}CLDFRA.py $file.tmpnc
     else
         variables="no2,no"
         echo "Copy $kind kind"
+        
         echo "        Copy variables: $variables"
         ncks -A -h -v $variables $file $file.tmpnc
         ncrename -h -v no2,no2_nolnox -v no,no_nolnox $file.tmpnc
+        
+        echo "        Copying attributes..."
+        ncks -A -h -x $file $file.tmpnc
     fi
-    
-    echo "        Copying attributes..."
-    ncks -A -h -x $file $file.tmpnc
-    
-    echo "        Calculating CLDFRA..."
-    python ${scriptdir}CLDFRA.py $file.tmpnc
 done
