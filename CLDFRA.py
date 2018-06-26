@@ -75,10 +75,6 @@ def cal_cldfra1(filename):
     ep_2=r_d/r_v
 
     #---------------------------------------------------------------------
-    import numpy as np
-    from numpy import exp
-    from netCDF4 import Dataset
-    from wrf import getvar, to_np
 
     ncfile = Dataset(filename)
 
@@ -177,17 +173,35 @@ def cal_cldfra1(filename):
                         CLDFRA[i,k,j] = 0.
     return CLDFRA
 
-def main(filename):
+def create(filename):
     ncfile = Dataset(filename,'r+')
-    # Create variable: CloudFraction_wrf
-    CloudFraction_wrf = ncfile.createVariable('CloudFraction_wrf','f4',('Time', 'bottom_top', 'south_north', 'west_east'))
-    CloudFraction_wrf.description = 'CloudFraction generated from wrf'
-    CloudFraction_wrf.FieldType = '104'
-    CloudFraction_wrf.MemoryOrder = 'XYZ'
-    CloudFraction_wrf.units = ''
-    CloudFraction_wrf.stagger= ''
-    CloudFraction_wrf.coordinates = 'XLONG XLAT'
-    ncfile.variables['CloudFraction_wrf'][0,:,:,:] = cal_cldfra1(filename)
+
+    # Create variable: CloudFraction (0~1)
+    cldfra_l           = ncfile.createDimension('cldfra_l', 1)
+    cldfra             = ncfile.createVariable('cldfra','f4',('Time', 'cldfra_l', 'south_north', 'west_east'))
+    cldfra.description = 'CloudFraction generated from wrf'
+    cldfra.FieldType   = '104'
+    cldfra.MemoryOrder = 'XYZ'
+    cldfra.units       = ''
+    cldfra.stagger     = ''
+    cldfra.coordinates = 'XLONG XLAT'
+    return (cldfra)
+
+def cldfra_max(filename,cldfra):
+    # Calculate cldfra_max between 350 hPa and 400 hPa
+    ncfile   = Dataset(filename,'r+')
+    P        = to_np(getvar(ncfile, 'P'))
+    PB       = to_np(getvar(ncfile, 'PB'))
+    pressure = (P + PB)/100 # hPa
+
+    CLDFRA = cal_cldfra1(filename)
+    for j in np.arange(pressure.shape[1]):
+        for k in np.arange(pressure.shape[2]):
+            ncfile.variables['cldfra'][:,:,j,k] = np.max(CLDFRA[np.where( (350 < pressure[:,j,k]) & (pressure[:,j,k] < 400))[0],j,k])
+
+def main(filename):
+    cldfra = create(filename)
+    cldfra_max(filename,cldfra)
 
 if __name__ == '__main__':
     args = parse_args()
