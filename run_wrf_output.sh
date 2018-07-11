@@ -169,7 +169,7 @@ do
         if [[ $varsout == 'behr' ]]
         then
             echo "Calling read_wrf_output"
-            $scriptdir/read_wrf_output.sh read_wrf.conf
+            $scriptdir/read_wrf_output.sh read_wrf.conf $choice
 
             if [[ $kind == "lnox" ]]
             then
@@ -195,9 +195,3 @@ do
         fi
     fi
 done
-
-# Whether delete original wrfout* files
-if [[ $choice == "del" ]]; then
-    echo "        Remove all wrfout* files in current directory"
-    rm wrfout_*
-fi
