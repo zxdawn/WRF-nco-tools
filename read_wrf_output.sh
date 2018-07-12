@@ -11,6 +11,9 @@
 mode=$WRFPROCMODE
 kind=$WRFKIND
 
+# Where processed wrfout* files are saved
+savedir=$WRFSAVE_DIR
+
 # Where the various NCO scripts are located
 scriptdir=$WRFSCRIPT_DIR
 if [[ $scriptdir == '' ]]
@@ -24,14 +27,8 @@ catfiles=''
 
 wrffiles=$(cat $1)
 
-count=0
 for file in $wrffiles
 do
-    if [[ $count == 0 ]]
-    then
-        size=$(du -b "$file" | cut -f 1)
-    fi
-    
     # Copy the variables needed to keep track of position & time,
     # plus the species mixing ratios that we're interested in.
     # U and V are temporary for studying the effect of wind on a priori
@@ -41,50 +38,33 @@ do
     # Add all variables which BEHR a priori and wrfpython need.
     # Since rProfile.m calculate 'pres,z,zlev' and convert no2 units,
     # We just need to extract necessary variables directly.
-    
-    actualsize=$(du -b "$file" | cut -f 1)
-    count=$count+1
-    
-    if [[ $actualsize == $size ]]
+    echo "        Copying variables..."
+    BEHR_variables="Times,XLAT,XLONG,XLONG_U,XLAT_U,XLONG_V,XLAT_V,U,V,COSALPHA,SINALPHA,P,PB,PHB,PH,no2,no,"
+    my_variables="T,HGT,^Q.?"
+
+    if [[ $kind == "lnox" ]]
     then
-        echo "        Copying variables..."
-        BEHR_variables="Times,XLAT,XLONG,XLONG_U,XLAT_U,XLONG_V,XLAT_V,U,V,COSALPHA,SINALPHA,P,PB,PHB,PH,no2,no,"
-        my_variables="T,HGT,^Q.?"
-
-        if [[ $kind == "lnox" ]]
-        then
-            variables=$BEHR_variables$my_variables
-            echo "Copy $kind kind"
-            
-            echo "        Copy variables: $variables"
-            ncks -A -h -v $variables $file $file.tmpnc
-            ncrename -h -v no2,no2_lnox -v no,no_lnox $file.tmpnc
-            ncks -A -h -v no2 $file $file.tmpnc
-            
-            echo "        Copying attributes..."
-            ncks -A -h -x $file $file.tmpnc
-            
-            echo "        Calculating CLDFRA..."
-            python ${scriptdir}CLDFRA.py $file.tmpnc
-        else
-            variables="no2,no"
-            echo "Copy $kind kind"
-            
-            echo "        Copy variables: $variables"
-            ncks -A -h -v $variables $file $file.tmpnc
-            ncrename -h -v no2,no2_nolnox -v no,no_nolnox $file.tmpnc
-            
-            echo "        Copying attributes..."
-            ncks -A -h -x $file $file.tmpnc
-        fi
-
-        # remove wrfout* files which have been processed
-        if [[ $2 == 'del' ]]
-        then
-            rm $file
-        fi
-
+        variables=$BEHR_variables$my_variables
+        echo "Copy $kind kind"
+        
+        echo "        Copy variables: $variables"
+        ncks -A -h -v $variables $file ${savedir}/$file
+        ncrename -h -v no2,no2_lnox -v no,no_lnox ${savedir}/$file
+        ncks -A -h -v no2 $file ${savedir}/$file
+        
+        echo "        Copying attributes..."
+        ncks -A -h -x $file ${savedir}/$file
+        
+        echo "        Calculating CLDFRA..."
+        python ${scriptdir}/CLDFRA.py ${savedir}/$file
     else
-        echo "        Skip $file"
+        variables="no2,no"
+        echo "Copy $kind kind"
+        echo "        Copy variables: $variables"
+        ncks -A -h -v $variables $file ${savedir}/$file
+        ncrename -h -v no2,no2_nolnox -v no,no_nolnox ${savedir}/$file
+        
+        echo "        Copying attributes..."
+        ncks -A -h -x $file ${savedir}/$file
     fi
 done
