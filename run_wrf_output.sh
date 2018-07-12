@@ -100,14 +100,27 @@ export WRFPROCMODE=$mode
 export WRFKIND=$kind
 
 # Where the actual scripts (read_wrf_output.sh) are kept.
-scriptdir='/nuist/u/home/yinyan/xin/work/BEHR/WRF-nco-tools/'
+scriptdir='/nuist/u/home/yinyan/xin/work/BEHR/WRF-nco-tools'
 export WRFSCRIPT_DIR=$scriptdir
 
-# Where new wrfout* files are saved
-savedir='/nuist/u/home/yinyan/xin/work/BEHR/data/wrf_profiles/history/'
+# Where new wrfout* files are saved and check it
+savedir='/nuist/u/home/yinyan/xin/work/BEHR/data/wrf_profiles/history'
+
+if [[ $kind == "lnox" ]]
+then
+    savedir=${savedir}"/lnox/"
+else
+    savedir=${savedir}"/nolnox/"
+fi
+
+if [ ! -d "${savedir}" ]
+then
+    mkdir -p $savedir
+fi
+
+export WRFSAVE_DIR=$savedir
 
 # Check the mode selection
-
 if [[ $mode != 'daily' && $mode != 'monthly' && $mode != 'hourly' ]]
 then
     echo "Input must be 'daily' or 'monthly'"
@@ -145,53 +158,62 @@ do
     olddate=$newdate
 done
 
-
 for day in $dates
 do
     echo ""
     echo "Files on $day"
     echo ""
-    # WRF file names include output time in UTC. We'll look for the output
-    # in the range of UTC times when OMI will be passing over domain
-    # for this day
-    # North America: {18,19,20,21,22}; add 17 for Gulf of Mexico #Xin 16 June 2018
-    # Southeast China: {06,07}
-    # If there are no files for this day or month, then it will try to iterate
-    # over the wildcard patterns themselves. Since those contain *, we
-    # can avoid doing anything in that case by requiring that the file
-    # name does not include a *
-    filepattern=$(echo wrfout*_"$domain"_${day}_{17,18,19,20,21,22}*)
-    if [[ $filepattern != *'*'* ]]
+    # Firstly, we need to ensure wrfout* files are enough to process.
+    # For example, history_interval = 30 needs 48 files each day.
+    # Then, we should check if all of these are finished by wrf_write.
+    # Xin Zhang <xinzhang1215@gmail.com> Jul 2018
+    wrf_files=$(echo wrfout*_"$domain"_${day}_*)
+    len_wrf="$(wc -w <<< ${wrf_files})"
+
+    if [[ ${len_wrf} == 48 ]]
     then
-        echo -e "Select these wrfout* files:\n $filepattern"
-        echo "$filepattern" > read_wrf.conf
-        # Choose which command to execute based on the command arguments
-        if [[ $varsout == 'behr' ]]
+        # Ensure that size of the last wrfout file is as same as others.
+        size_1=$(stat -c %s wrfout_"$domain"_${day}_00:00:00)
+        size_2=$(stat -c %s wrfout_"$domain"_${day}_23:30:00)
+        if [[ $size_1 == $size_2 ]]
         then
-            echo "Calling read_wrf_output"
-            $scriptdir/read_wrf_output.sh read_wrf.conf $choice
-
-            if [[ $kind == "lnox" ]]
+            # WRF file names include output time in UTC. We'll look for the output
+            # in the range of UTC times when OMI will be passing over domain
+            # for this day
+            # North America: {18,19,20,21,22}; add 17 for Gulf of Mexico #Xin 16 June 2018
+            # Southeast China: {06,07}
+            # If there are no files for this day or month, then it will try to iterate
+            # over the wildcard patterns themselves. Since those contain *, we
+            # can avoid doing anything in that case by requiring that the file
+            # name does not include a *
+            filepattern=$(echo wrfout*_"$domain"_${day}_{17,18,19,20,21,22}*)
+            if [[ $filepattern != *'*'* ]]
             then
-                savedir=${savedir}"lnox/"
-            else
-                savedir=${savedir}"nolnox/"
+                echo -e "Select these wrfout* files:\n $filepattern"
+                echo "$filepattern" > read_wrf.conf
+                # Choose which command to execute based on the command arguments
+                if [[ $varsout == 'behr' ]]
+                then
+                    echo "Calling read_wrf_output"
+                    echo "Save to $savedir"
+                    $scriptdir/read_wrf_output.sh read_wrf.conf
+                elif [[ $varsout == 'emis' ]]
+                then
+                    $scriptdir/read_wrf_emis.sh read_wrf.conf
+                elif [[ $varsout == 'avg' ]]
+                then
+                    $scriptdir/avg_wrf_output.sh read_wrf.conf
+                else
+                    echo "Error at $LINENO in slurmrun_wrf_output.sh: \"$varsout\" is not a recognized operation"
+                    exit 1
+                fi
             fi
-            mkdir -p $savedir
 
-            echo "Save to $savedir"
-            mv *.tmpnc $savedir
-            for file in $savedir*.tmpnc; do mv "$file" "${file%%.tmpnc}"; done
-
-        elif [[ $varsout == 'emis' ]]
-        then
-            $scriptdir/read_wrf_emis.sh read_wrf.conf
-        elif [[ $varsout == 'avg' ]]
-        then
-            $scriptdir/avg_wrf_output.sh read_wrf.conf
-        else
-            echo "Error at $LINENO in slurmrun_wrf_output.sh: \"$varsout\" is not a recognized operation"
-            exit 1
+            # remove wrfout* files
+            if [[ $choice == 'del' ]]
+            then
+                        rm wrfout_"$domain"_${day}_*
+            fi
         fi
     fi
 done
