@@ -40,7 +40,7 @@ do
     # We just need to extract necessary variables directly.
     echo "        Copying variables..."
     BEHR_variables="Times,XLAT,XLONG,XLONG_U,XLAT_U,XLONG_V,XLAT_V,U,V,COSALPHA,SINALPHA,P,PB,PHB,PH,no2,no,o3,"
-    my_variables="T,HGT,^Q.?"
+    my_variables="T,HGT,IC_FLASHCOUNT,CG_FLASHCOUNT,^Q.?"
 
     if [[ $kind == "lnox" ]]
     then
