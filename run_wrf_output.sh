@@ -180,13 +180,13 @@ do
             # WRF file names include output time in UTC. We'll look for the output
             # in the range of UTC times when OMI will be passing over domain
             # for this day
-            # North America: {18,19,20,21,22}; add 17 for Gulf of Mexico #Xin 16 June 2018
+            # North America: {18,19,20,21,22}; add 16,17 for Gulf of Mexico #Xin 16 June 2018
             # Southeast China: {06,07}
             # If there are no files for this day or month, then it will try to iterate
             # over the wildcard patterns themselves. Since those contain *, we
             # can avoid doing anything in that case by requiring that the file
             # name does not include a *
-            filepattern=$(echo wrfout*_"$domain"_${day}_{17,18,19,20,21,22}*)
+            filepattern=$(echo wrfout*_"$domain"_${day}_{16,17,18,19,20,21,22}*)
             if [[ $filepattern != *'*'* ]]
             then
                 echo -e "Select these wrfout* files:\n $filepattern"
