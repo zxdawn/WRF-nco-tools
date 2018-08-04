@@ -3,9 +3,10 @@
 # and get LNO and LNO2
 
 # Set dir of wrfout* which have been extracted
-savedir='/nuist/u/home/yinyan/xin/work/BEHR/data/wrf_profiles/history/'
-lnox_dir=${savedir}lnox/
-nolnox_dir=${savedir}nolnox/
+datadir='/nuist/u/home/yinyan/xin/work/BEHR/data/wrf_profiles/history'
+lnox_dir=${datadir}'/lnox/'
+nolnox_dir=${datadir}'/nolnox/'
+savedir='/nuist/u/home/yinyan/xin/work/BEHR/data/wrf_profiles/history/processed'
 
 # Check same files in lnox_dir and nolnox_dir
 # Then append variables and calculate
@@ -20,6 +21,7 @@ for file in $files
             ncks -A -h $lnox_dir$file.tmpnc $lnox_dir$file
             ncatted -O -h -a description,lno2,o,c,'LNO2 mixing ratio' $lnox_dir$file
             ncatted -O -h -a description,lno,o,c,'LNO mixing ratio' $lnox_dir$file
+            mv $lnox_dir$file $savedir$file
         fi
     done
 
