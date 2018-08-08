@@ -100,11 +100,11 @@ export WRFPROCMODE=$mode
 export WRFKIND=$kind
 
 # Where the actual scripts (read_wrf_output.sh) are kept.
-scriptdir='/nuist/u/home/yinyan/xin/work/BEHR/WRF-nco-tools'
+scriptdir='/data/home/wang/zx/BEHR/WRF-nco-tools'
 export WRFSCRIPT_DIR=$scriptdir
 
 # Where new wrfout* files are saved and check it
-savedir='/nuist/u/home/yinyan/xin/work/BEHR/data/wrf_profiles/history'
+savedir='/data/home/wang/zx/data/history/processed'
 
 if [[ $kind == "lnox" ]]
 then
