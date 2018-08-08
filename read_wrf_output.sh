@@ -34,7 +34,7 @@ do
     # U and V are temporary for studying the effect of wind on a priori
     # COSALPHA AND SINALPHA are needed to convert the winds from grid
     # relative to earth relative. See http://forum.wrfforum.com/viewtopic.php?f=8&t=3225
-    # Xin
+    # Xin:
     # Add all variables which BEHR a priori and wrfpython need.
     # Since rProfile.m calculate 'pres,z,zlev' and convert no2 units,
     # We just need to extract necessary variables directly.
@@ -55,8 +55,7 @@ do
         echo "        Copying attributes..."
         ncks -A -h -x $file ${savedir}/$file
         
-        echo "        Calculating CLDFRA..."
-        python ${scriptdir}/CLDFRA.py ${savedir}/$file
+
     else
         variables="no2,no"
         echo "Copy $kind kind"
@@ -68,3 +67,6 @@ do
         ncks -A -h -x $file ${savedir}/$file
     fi
 done
+
+echo "Calculating CLDFRA..."
+python ${scriptdir}/CLDFRA.py ${savedir}

@@ -1,16 +1,57 @@
-import argparse
+import sys
+import itertools
 import numpy as np
 from numpy import exp
+from numba import njit
 from netCDF4 import Dataset
+import multiprocessing as mp
+from functools import partial
 from wrf import getvar, to_np
 
-def parse_args():
-    parser = argparse.ArgumentParser(description="program to calculate CloudFraction")
-    parser.add_argument("filename", help="name of wrfout file")
-    args = parser.parse_args()
-    return vars(args)
 
-def cal_cldfra1(filename):
+def get_variables(filename):
+    global f
+    f = Dataset(filename,'r+')
+    phys   = f.MP_PHYSICS
+    P      = to_np(getvar(f, 'P'))
+    PB     = to_np(getvar(f, 'PB'))
+    t_phy  = to_np(getvar(f, 'temp'))
+    p_phy  = to_np(getvar(f, 'p'))
+    QV     = to_np(getvar(f, 'QVAPOR')) # water vapor mixing ratio (kg/kg)
+    QC     = to_np(getvar(f, 'QCLOUD')) # cloud water mixing ratio (kg/kg)
+    Qr     = to_np(getvar(f, 'QRAIN'))  # rain water mixing ratio (kg/kg)
+    QI     = to_np(getvar(f, 'QICE'))   # cloud ice mixing ratio (kg/kg)
+    QS     = to_np(getvar(f, 'QSNOW'))  # snow mixing ratio (kg/kg)
+    return phys, P, PB, t_phy, p_phy, QV, QC, Qr, QI, QS
+
+
+def create():
+    # Create variable: CloudFraction (0~1)
+    cldfra             = f.createVariable('cldfra','f4',('Time', 'south_north', 'west_east'))
+    cldfra.description = 'CloudFraction generated from wrf'
+    cldfra.FieldType   = '104'
+    cldfra.MemoryOrder = 'XYZ'
+    cldfra.units       = ''
+    cldfra.stagger     = ''
+    cldfra.coordinates = 'XLONG XLAT'
+
+    return cldfra
+
+
+def cal_cldfra(phys, P, PB, t_phy, p_phy, QV, QC, Qr, QI, QS):
+    # Calculate cldfra_max between 350 hPa and 400 hPa
+    pressure = (P + PB)/100 # hPa
+
+    CLDFRA = np.zeros_like(t_phy)
+    CLDFRA = cal_cldfra1(phys, t_phy, p_phy, QV, QC, Qr, QI, QS, CLDFRA)
+
+    temp_array = np.zeros((1,pressure.shape[1],pressure.shape[2]))
+    CLDFRA = cldfra_max(pressure, CLDFRA, temp_array)
+    f.variables['cldfra'][:] = CLDFRA
+
+
+@njit
+def cal_cldfra1(phys, t_phy, p_phy, QV, QC, Qr, QI, QS, CLDFRA):
     # cal_cldfra1 - Compute cloud fraction
     # Code adapted from that in module_ra_gfdleta.F in WRF_v2.0.3 by James Done
     ##
@@ -57,6 +98,79 @@ def cal_cldfra1(filename):
     # a =   21.8745584      17.2693882
     # b =   7.66            35.86
 
+    for i in np.arange(t_phy.shape[0]):
+        for j in np.arange(t_phy.shape[1]):
+            for k in np.arange(t_phy.shape[2]):
+                tc   = t_phy[i,j,k] - SVPT0
+                esw  = 1000.0 * SVP1 * exp( SVP2  * tc / ( t_phy[i,j,k] - SVP3  ) )
+                esi  = 1000.0 * SVP1 * exp( SVPI2 * tc / ( t_phy[i,j,k] - SVPI3 ) )
+                QVSW = ep_2 * esw / ( p_phy[i,j,k] - esw )
+                QVSI = ep_2 * esi / ( p_phy[i,j,k] - esi )
+
+                # mji - For MP options 2, 4, 6, 7, 8, etc. (qc = liquid, qi = ice, qs = snow)            
+                if (phys in (2, 4, 6, 7, 8)):
+                    QCLD = QI[i,j,k]+QC[i,j,k]+QS[i,j,k]
+                    if (QCLD < QCLDMIN):
+                        weight = 0.
+                    else:
+                        weight = (QI[i,j,k]+QS[i,j,k]) / QCLD
+
+                else:
+                    CLDFRA[i,j,k] = 0.
+
+                QVS_WEIGHT = (1-weight)*QVSW + weight*QVSI
+                RHUM = QV[i,j,k]/QVS_WEIGHT   #--- Relative humidity
+                #
+                #--- Determine cloud fraction (modified from original algorithm)
+                #
+                if (QCLD < QCLDMIN):
+                #
+                #--- Assume zero cloud fraction if there is no cloud mixing ratio
+                #
+                    CLDFRA[i,j,k] = 0.
+                elif (RHUM > RHGRID):
+                #
+                #--- Assume cloud fraction of unity if near saturation and the cloud
+                #    mixing ratio is at or above the minimum threshold
+                #
+                    CLDFRA[i,j,k] = 1.
+                else:
+                #
+                #--- Adaptation of original algorithm (Randall, 1994; Zhao, 1995)
+                #    modified based on assumed grid-scale saturation at RH=RHgrid.
+                #
+                    SUBSAT = max(1.e-10,RHGRID*QVS_WEIGHT-QV[i,j,k])
+                    DENOM  = (SUBSAT)**GAMMA
+                    ARG    = max(-6.9, -ALPHA0*QCLD/DENOM)    # <-- exp(-6.9)=.001
+                # prevent negative values  (new)
+                    RHUM   = max(1.e-10, RHUM)
+                    CLDFRA[i,j,k] = (RHUM/RHGRID)**PEXP*(1.-exp(ARG))
+                ##              ARG=-1000*QCLD/(RHUM-RHGRID)
+                ##              ARG=max(ARG, ARGMIN)
+                ##              CLDFRA[i,j,k]=(RHUM/RHGRID)*(1.-exp(ARG))
+                    if (CLDFRA[i,j,k] < .01):
+                        CLDFRA[i,j,k] = 0.
+
+    return CLDFRA
+
+
+@njit
+def cldfra_max(pressure, CLDFRA, temp_array):
+    for j in np.arange(pressure.shape[1]):
+        for k in np.arange(pressure.shape[2]):
+            temp_array[:,j,k] = np.max(CLDFRA[np.where( (350 < pressure[:,j,k]) & (pressure[:,j,k] < 400))[0],j,k])
+
+    return temp_array
+
+
+def main(filename):
+    phys, P, PB, t_phy, p_phy, QV, QC, Qr, QI, QS = get_variables(filename)
+    cldfra = create()
+    cal_cldfra(phys, P, PB, t_phy, p_phy, QV, QC, Qr, QI, QS)
+    f.close()
+
+
+if __name__ == '__main__':
     #---------------------------------------------------------------------
     # Constants
     ALPHA0 = 100.
@@ -72,137 +186,12 @@ def cal_cldfra1(filename):
     SVPT0 = 273.15
     r_d = 287.
     r_v = 461.6
-    ep_2=r_d/r_v
+    ep_2 = r_d/r_v
 
     #---------------------------------------------------------------------
+    with open('read_wrf.conf') as name:
+        namelist = name.read().replace('\n', '').split()
+        namelist = [sys.argv[1]+s for s in namelist]
 
-    ncfile = Dataset(filename)
-
-    t_phy  = to_np(getvar(ncfile, 'temp'))
-    p_phy  = to_np(getvar(ncfile, 'p'))
-    QV     = to_np(getvar(ncfile, 'QVAPOR')) # water vapor mixing ratio (kg/kg)
-    QC     = to_np(getvar(ncfile, 'QCLOUD')) # cloud water mixing ratio (kg/kg)
-    Qr     = to_np(getvar(ncfile, 'QRAIN'))  # rain water mixing ratio (kg/kg)
-    QI     = to_np(getvar(ncfile, 'QICE'))   # cloud ice mixing ratio (kg/kg)
-    QS     = to_np(getvar(ncfile, 'QSNOW'))  # snow mixing ratio (kg/kg)
-
-    CLDFRA = np.zeros_like(t_phy)
-
-    for i in np.arange(t_phy.shape[0]):
-        for k in np.arange(t_phy.shape[1]):
-            for j in np.arange(t_phy.shape[2]):
-                tc   = t_phy[i,k,j] - SVPT0
-                esw  = 1000.0 * SVP1 * exp( SVP2  * tc / ( t_phy[i,k,j] - SVP3  ) )
-                esi  = 1000.0 * SVP1 * exp( SVPI2 * tc / ( t_phy[i,k,j] - SVPI3 ) )
-                QVSW = ep_2 * esw / ( p_phy[i,k,j] - esw )
-                QVSI = ep_2 * esi / ( p_phy[i,k,j] - esi )
-
-                # mji - For MP options 2, 4, 6, 7, 8, etc. (qc = liquid, qi = ice, qs = snow)            
-                if (ncfile.MP_PHYSICS in (2, 4, 6, 7, 8)):
-                    QCLD = QI[i,k,j]+QC[i,k,j]+QS[i,k,j]
-                    if (QCLD < QCLDMIN):
-                        weight = 0.
-                    else:
-                        weight = (QI[i,k,j]+QS[i,k,j]) / QCLD
-
-                # mji - For MP options 1 and 3, (qc only)
-                #  For MP=1, qc = liquid, for MP=3, qc = liquid or ice depending on temperature
-                elif (ncfile.MP_PHYSICS in (1, 3)):
-                    QCLD = QC[i,k,j]
-                    if (QCLD < QCLDMIN):
-                       weight = 0.
-                    else:
-                       if (t_phy[i,k,j] > 273.15): weight = 0.
-                       if (t_phy[i,k,j] <= 273.15): weight = 1.        
-
-                # mji - For MP option 5; (qc = liquid, qs = ice)
-                # Mixing ratios of cloud water & total ice (cloud ice + snow).
-                # Mixing ratios of rain are not considered in this scheme.
-                # F_ICE is fraction of ice
-                # F_RAIN is fraction of rain
-                elif (ncfile.MP_PHYSICS in (5)):
-                    QIMID = QS[i,k,j]
-                    QWMID = QC[i,k,j]
-                    # old method
-                    #           QIMID = QC[i,k,j]*F_ICE_PHY[i,k,j]
-                    #           QWMID = (QC[i,k,j]-QIMID)*(1.-F_RAIN_PHY[i,k,j])
-                    #
-                    #--- Total "cloud" mixing ratio, QCLD.  Rain is not part of cloud,
-                    #    only cloud water + cloud ice + snow
-                    #
-                    QCLD = QWMID + QIMID
-                    if (QCLD < QCLDMIN):
-                        weight = 0.
-                    else:
-                        weight = F_ICE_PHY[i,k,j]
-
-                else:
-                    CLDFRA[i,k,j] = 0.
-
-                QVS_WEIGHT = (1-weight)*QVSW + weight*QVSI
-                RHUM = QV[i,k,j]/QVS_WEIGHT   #--- Relative humidity
-                #
-                #--- Determine cloud fraction (modified from original algorithm)
-                #
-                if (QCLD < QCLDMIN):
-                #
-                #--- Assume zero cloud fraction if there is no cloud mixing ratio
-                #
-                    CLDFRA[i,k,j] = 0.
-                elif (RHUM > RHGRID):
-                #
-                #--- Assume cloud fraction of unity if near saturation and the cloud
-                #    mixing ratio is at or above the minimum threshold
-                #
-                    CLDFRA[i,k,j] = 1.
-                else:
-                #
-                #--- Adaptation of original algorithm (Randall, 1994; Zhao, 1995)
-                #    modified based on assumed grid-scale saturation at RH=RHgrid.
-                #
-                    SUBSAT = max(1.e-10,RHGRID*QVS_WEIGHT-QV[i,k,j])
-                    DENOM  = (SUBSAT)**GAMMA
-                    ARG    = max(-6.9, -ALPHA0*QCLD/DENOM)    # <-- exp(-6.9)=.001
-                # prevent negative values  (new)
-                    RHUM   = max(1.e-10, RHUM)
-                    CLDFRA[i,k,j] = (RHUM/RHGRID)**PEXP*(1.-exp(ARG))
-                ##              ARG=-1000*QCLD/(RHUM-RHGRID)
-                ##              ARG=max(ARG, ARGMIN)
-                ##              CLDFRA[i,k,j]=(RHUM/RHGRID)*(1.-exp(ARG))
-                    if (CLDFRA[i,k,j] < .01):
-                        CLDFRA[i,k,j] = 0.
-    return CLDFRA
-
-def create(filename):
-    ncfile = Dataset(filename,'r+')
-
-    # Create variable: CloudFraction (0~1)
-    cldfra_l           = ncfile.createDimension('cldfra_l', 1)
-    cldfra             = ncfile.createVariable('cldfra','f4',('Time', 'cldfra_l', 'south_north', 'west_east'))
-    cldfra.description = 'CloudFraction generated from wrf'
-    cldfra.FieldType   = '104'
-    cldfra.MemoryOrder = 'XYZ'
-    cldfra.units       = ''
-    cldfra.stagger     = ''
-    cldfra.coordinates = 'XLONG XLAT'
-    return (cldfra)
-
-def cldfra_max(filename,cldfra):
-    # Calculate cldfra_max between 350 hPa and 400 hPa
-    ncfile   = Dataset(filename,'r+')
-    P        = to_np(getvar(ncfile, 'P'))
-    PB       = to_np(getvar(ncfile, 'PB'))
-    pressure = (P + PB)/100 # hPa
-
-    CLDFRA = cal_cldfra1(filename)
-    for j in np.arange(pressure.shape[1]):
-        for k in np.arange(pressure.shape[2]):
-            ncfile.variables['cldfra'][:,:,j,k] = np.max(CLDFRA[np.where( (350 < pressure[:,j,k]) & (pressure[:,j,k] < 400))[0],j,k])
-
-def main(filename):
-    cldfra = create(filename)
-    cldfra_max(filename,cldfra)
-
-if __name__ == '__main__':
-    args = parse_args()
-    main(**args)
+    with mp.Pool(processes=mp.cpu_count()) as pool:
+        pool.map(main, namelist)
